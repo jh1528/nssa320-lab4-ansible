@@ -1,32 +1,35 @@
 #!/usr/bin/env bash
-# ================================================================================
+# ==============================================================================
 # common.sh
-# ================================================================================
+# ==============================================================================
 #
-# Shared output and safety helpers for infrastructure automation scripts.
-#
-# Purpose:
-#  - Provide consistent, color-coded terminal output
-#  - Separate neutral progress messages from check/result messages
-#  - Provide reusable safety checks for root access and required commands
-#  - Keep logging simple and reusable across Lab 4 scripts
-#
-# Design:
-#  - Use step/info for general workflow output
-#  - Use pass/warn/fail only for check or result-style output
-#  - Use die for fatal errors that should stop script execution
-#  - Disable colors automatically when stdout is not a terminal
-#
-# RICE Framework:
-#  - Reproducibility: Every script uses the same output/check behavior.
-#  - Idempotency: Helper checks reduce accidental destructive behavior.
-#  - Composability: This file can be sourced by health, bootstrap, and validation scripts.
-#  - Evolvability: New helper functions can be added here without rewriting every script.
+# Shared output and safety helpers...
 #
 # Author:
 #  - Jared Husson
 #
-# ================================================================================
+# ==============================================================================
+# Version History
+# ==============================================================================
+#
+# Version: 1.2
+# Date: 2026-06-09
+#
+# Changes:
+#  - Added source guard to prevent duplicate loading.
+#  - Switched output helpers from echo -e to printf for safer formatting.
+#  - Added shared safety helpers:
+#      require_root
+#      require_command
+#      require_file
+#      run_or_die
+#  - Kept color-coded PASS/WARN/FAIL/INFO/STEP output for readable validation.
+#
+# Notes:
+#  - Version 1.2 is the baseline reusable common helper library for Activity 1.
+#  - Future scripts should source this file instead of redefining output helpers.
+#
+# ==============================================================================
 
 
 # ================================================================================
