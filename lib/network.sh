@@ -37,7 +37,7 @@
 # Version History
 # ==============================================================================
 #
-# Version: 1.0
+# Version: 1.1
 # Date: 2026-06-09
 #
 # Changes:
@@ -70,7 +70,9 @@ LAB4_NETWORK_SH_LOADED="true"
 detect_active_nm_connection() {
     local connection
 
-    require_command nmcli
+    if ! command -v nmcli >/dev/null 2>&1; then
+        die "Required command not found: nmcli"
+    fi
 
     connection="$(nmcli -t -f NAME,DEVICE con show --active | awk -F: 'NR==1 {print $1}')"
 
@@ -84,7 +86,9 @@ detect_active_nm_connection() {
 detect_active_nm_device() {
     local device
 
-    require_command nmcli
+    if ! command -v nmcli >/dev/null 2>&1; then
+        die "Required command not found: nmcli"
+    fi
 
     device="$(nmcli -t -f NAME,DEVICE con show --active | awk -F: 'NR==1 {print $2}')"
 
