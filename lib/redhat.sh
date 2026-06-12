@@ -10,11 +10,13 @@
 # Scope:
 #   This library is designed for Activity 2 control-node preparation.
 #   It checks Red Hat release information, subscription-manager availability,
-#   registration identity, subscription status, and enabled repositories.
+#   registration identity, subscription/content access status, and enabled
+#   repositories.
 #
 # Safety:
 #   This file should be sourced by scripts, not executed directly.
-#   It does not register, unregister, overwrite, or refresh Red Hat licensing.
+#   It does not register, unregister, overwrite, refresh, or modify Red Hat
+#   licensing.
 #   It does not store Red Hat credentials, passwords, tokens, or secrets.
 #
 # RICE Notes:
@@ -25,6 +27,9 @@
 #
 # Version History:
 #   v2.0 - Initial Red Hat subscription helper library for Activity 2.
+#   v2.1 - Added CodeReady Builder and deprecated Ansible Engine repo checks.
+#   v2.2 - Treat RIT/Satellite Organization/Environment content access as valid
+#          even when subscription-manager reports Overall Status: Unknown.
 
 # ---------------------------------------------------------------------------
 # Safety guard
@@ -85,16 +90,33 @@ check_subscription_identity() {
 }
 
 check_subscription_status() {
-  step "Checking Red Hat subscription status"
+  step "Checking Red Hat subscription/content access status"
 
-  if subscription-manager status; then
+  local status_output
+  local status_rc
+
+  set +e
+  status_output="$(subscription-manager status 2>&1)"
+  status_rc=$?
+  set -e
+
+  printf '%s\n' "$status_output"
+
+  if [[ "$status_rc" -eq 0 ]]; then
     pass "subscription-manager status completed successfully."
     return 0
   fi
 
+  if grep -qi "This host has access to content" <<< "$status_output"; then
+    warn "subscription-manager status returned non-zero, but content access is available."
+    warn "Overall Status may appear as Unknown in the RIT/Satellite environment."
+    pass "Red Hat content access appears usable for Activity 2."
+    return 0
+  fi
+
   fail "subscription-manager status reported a problem."
-  warn "The system may be registered but not fully subscribed."
-  warn "Check redhat.rit.edu and confirm the system is properly subscribed."
+  warn "The system may be registered but may not have usable content access."
+  warn "Check redhat.rit.edu and confirm the system is properly registered/subscribed."
   return 1
 }
 
@@ -115,12 +137,19 @@ list_enabled_repos() {
   return 1
 }
 
+get_enabled_repos_output() {
+  subscription-manager repos --list-enabled 2>/dev/null
+}
+
 check_enabled_repo_keyword() {
   local repo_keyword="$1"
+  local repos_output
 
   step "Checking for enabled repository keyword: ${repo_keyword}"
 
-  if subscription-manager repos --list-enabled 2>/dev/null | grep -qi "$repo_keyword"; then
+  repos_output="$(get_enabled_repos_output || true)"
+
+  if grep -qi "$repo_keyword" <<< "$repos_output"; then
     pass "Repository keyword found in enabled repositories: ${repo_keyword}"
     return 0
   fi
@@ -146,10 +175,13 @@ check_codeready_builder_enabled() {
 
 check_deprecated_ansible_repo_not_enabled() {
   local repo_keyword="${ACTIVITY2_DEPRECATED_REPO_KEYWORD:-ansible-2}"
+  local repos_output
 
   step "Checking deprecated Ansible Engine repository is not enabled"
 
-  if subscription-manager repos --list-enabled 2>/dev/null | grep -qi "$repo_keyword"; then
+  repos_output="$(get_enabled_repos_output || true)"
+
+  if grep -qi "$repo_keyword" <<< "$repos_output"; then
     fail "Deprecated Ansible Engine repository appears to be enabled: ${repo_keyword}"
     warn "The lab says not to enable Red Hat Ansible Engine 2 for RHEL 8."
     return 1
