@@ -17,6 +17,7 @@
 #   Does not update packages.
 #   Does not register, unregister, refresh, or overwrite Red Hat licensing.
 #   Does not configure managed hosts, SSH keys, Ansible users, or sudoers files.
+#   Must not be run with sudo or as root.
 #
 # RICE Notes:
 #   Reproducibility - runs the same verification sequence each time.
@@ -29,6 +30,7 @@
 #   v2.1 - Added automated Figure 2 screenshot capture with text evidence backup.
 #   v2.1.1 - Added graphical display preflight check for safer screenshot capture.
 #   v2.1.2 - Improved screenshot tool failure reporting and manual fallback guidance.
+#   v2.1.3 - Added root/sudo guard to protect user-owned evidence and GUI screenshots.
 
 set -euo pipefail
 
@@ -74,11 +76,29 @@ Notes:
   The text log is supporting evidence for troubleshooting and documentation.
 
   Automatic screenshot capture requires a graphical desktop session.
-  If this script is run over SSH or from a non-GUI terminal, it will still
-  print the Figure 2 evidence block and save the text log, but screenshot
-  capture may need to be done manually.
+  If this script is run from a non-GUI terminal or a session that cannot access
+  the display server, it will still print the Figure 2 evidence block and save
+  the text log, but screenshot capture may need to be done manually.
+
+  Do not run this script with sudo.
+  Evidence files and screenshots should be created from the student user session.
 
 EOF
+}
+
+refuse_root_execution() {
+  step "Checking verification execution user"
+
+  if [[ "$EUID" -eq 0 ]]; then
+    fail "Do not run this verification script with sudo or as root."
+    warn "This script creates user-owned evidence and may use GUI screenshot tools."
+    warn "Running it with sudo can create root-owned evidence files and break screenshot capture."
+    warn "Run instead:"
+    warn "  ./scripts/verify-control-node.sh"
+    return 1
+  fi
+
+  pass "Verification script is running as a non-root user."
 }
 
 print_figure2_block() {
@@ -117,6 +137,12 @@ graphical_display_available() {
       warn "DISPLAY is set to ${DISPLAY}, but the X11 socket is not available."
       return 1
     fi
+  fi
+
+  if [[ "${XDG_SESSION_TYPE:-}" == "wayland" ]]; then
+    warn "Wayland session detected."
+    warn "Some X11 screenshot tools such as scrot/import may not work under Wayland."
+    warn "gnome-screenshot may still work if it can access the active user session."
   fi
 
   pass "Graphical display appears available: ${DISPLAY}"
@@ -210,9 +236,17 @@ capture_screenshot_with_available_tool() {
 
   mkdir -p "$ACTIVITY2_EVIDENCE_DIR"
 
+  if [[ ! -w "$ACTIVITY2_EVIDENCE_DIR" ]]; then
+    fail "Evidence directory is not writable by the current user: ${ACTIVITY2_EVIDENCE_DIR}"
+    warn "This usually happens if the verification script was previously run with sudo."
+    warn "Fix ownership, then rerun as student:"
+    warn "  sudo chown -R student:student ${ACTIVITY2_EVIDENCE_DIR}"
+    warn "  ./scripts/verify-control-node.sh"
+    return 1
+  fi
+
   if ! graphical_display_available; then
     warn "Automatic screenshot capture requires a graphical desktop session."
-    warn "If connected over SSH or a non-GUI terminal, the VM cannot capture the visible host terminal."
     warn "Manual fallback: screenshot the Figure 2 terminal block above."
     return 1
   fi
@@ -251,6 +285,15 @@ write_text_evidence() {
   step "Writing supporting text evidence"
 
   mkdir -p "$ACTIVITY2_EVIDENCE_DIR"
+
+  if [[ ! -w "$ACTIVITY2_EVIDENCE_DIR" ]]; then
+    fail "Evidence directory is not writable by the current user: ${ACTIVITY2_EVIDENCE_DIR}"
+    warn "This usually happens if the verification script was previously run with sudo."
+    warn "Fix ownership, then rerun as student:"
+    warn "  sudo chown -R student:student ${ACTIVITY2_EVIDENCE_DIR}"
+    warn "  ./scripts/verify-control-node.sh"
+    return 1
+  fi
 
   {
     printf 'Figure 2 - Ansible Install Verification\n'
@@ -296,6 +339,8 @@ run_preflight_checks() {
 }
 
 run_verification() {
+  refuse_root_execution
+
   run_preflight_checks
 
   write_text_evidence
