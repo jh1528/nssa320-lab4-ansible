@@ -1,0 +1,6 @@
+# Activity evidence archive attempts
+evidence/archive/*.log
+
+# Temporary runtime output
+*.tmp
+*.out
