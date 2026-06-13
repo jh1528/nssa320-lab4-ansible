@@ -1,40 +1,278 @@
 #!/usr/bin/env bash
+# ==============================================================================
+# redhat.sh
+# ==============================================================================
 #
-# NSSA320 Lab 4 - Red Hat Subscription Library
-# File: lib/redhat.sh
+# Shared Red Hat Enterprise Linux helper functions for Lab 4 automation scripts.
 #
 # Purpose:
-#   Provides reusable Red Hat subscription and repository helper functions
-#   for Lab 4 Activity 2 workflows.
+#  - Check Red Hat release information
+#  - Check subscription-manager availability
+#  - Check Red Hat subscription identity and status safely
+#  - Check enabled repository information without triggering GUI authentication
+#  - Support Activity 2 control-node verification and setup workflows
 #
-# Scope:
-#   This library is designed for Activity 2 control-node preparation.
-#   It checks Red Hat release information, subscription-manager availability,
-#   registration identity, subscription/content access status, and enabled
-#   repositories.
+# Design:
+#  - This file does not auto-run actions when sourced.
+#  - Functions are called by setup and verification scripts.
+#  - Output is handled through lib/common.sh.
+#  - Verification should remain non-root and should not trigger GUI auth prompts.
 #
-# Safety:
-#   This file should be sourced by scripts, not executed directly.
-#   It does not register, unregister, overwrite, refresh, or modify Red Hat
-#   licensing.
-#   It does not store Red Hat credentials, passwords, tokens, or secrets.
+# RICE Framework:
+#  - Reproducibility: Red Hat checks produce predictable PASS/WARN/FAIL output.
+#  - Idempotency: Checks do not change system state.
+#  - Composability: Setup and verify scripts can reuse shared helper functions.
+#  - Evolvability: Repository and subscription checks can be extended later.
 #
-# RICE Notes:
-#   Reproducibility - standardizes Red Hat subscription and repository checks.
-#   Idempotency     - checks current state without changing registration.
-#   Composability   - reusable by Activity 2 setup and verification scripts.
-#   Evolvability    - future Red Hat repository checks can be added here.
+# Dependencies:
+#  - lib/common.sh must be sourced before this file is used.
 #
-# Version History:
-#   v2.0 - Initial Red Hat subscription helper library for Activity 2.
-#   v2.1 - Added CodeReady Builder and deprecated Ansible Engine repo checks.
-#   v2.2 - Treat RIT/Satellite Organization/Environment content access as valid
-#          even when subscription-manager reports Overall Status: Unknown.
+# Author:
+#  - Jared Husson
+#
+# ==============================================================================
+# Version History
+# ==============================================================================
+#
+# Version: 1.0
+# Date: 2026-06-10
+#
+# Changes:
+#  - Added Red Hat release checks.
+#  - Added subscription-manager availability checks.
+#  - Added subscription identity and status checks.
+#  - Added enabled repository keyword checks.
+#
+# ------------------------------------------------------------------------------
+#
+# Version: 1.1
+# Date: 2026-06-12
+#
+# Changes:
+#  - Prevented non-root verification from triggering GUI authentication prompts.
+#  - Added non-interactive subscription-manager helper using sudo -n.
+#  - Updated enabled repository checks to use dnf repolist instead of
+#    subscription-manager repos --list-enabled.
+#  - Preserved Activity 2 verification behavior while keeping evidence files
+#    owned by the student user.
+#
+# Notes:
+#  - setup-control-node.sh may still be run with sudo when applying system changes.
+#  - verify-control-node.sh should run as the normal student user.
+#
+# ==============================================================================
 
-# ---------------------------------------------------------------------------
-# Safety guard
-# ---------------------------------------------------------------------------
 
+# ==============================================================================
+# Source Guard
+# ==============================================================================
+
+if [[ -n "${LAB4_REDHAT_SH_LOADED:-}" ]]; then
+    return 0
+fi
+
+LAB4_REDHAT_SH_LOADED="true"
+LAB4_REDHAT_VERSION="v1.1"
+
+
+# ==============================================================================
+# Red Hat Release Checks
+# ==============================================================================
+
+check_redhat_release() {
+    step "Checking Red Hat release information"
+
+    if [[ ! -f /etc/redhat-release ]]; then
+        fail "Red Hat release file was not found."
+        warn "This host does not appear to be a Red Hat Enterprise Linux system."
+        return 1
+    fi
+
+    pass "Red Hat release file found."
+    info "$(cat /etc/redhat-release)"
+    return 0
+}
+
+check_redhat_release_info() {
+    check_redhat_release
+}
+
+
+# ==============================================================================
+# subscription-manager Helpers
+# ==============================================================================
+
+check_subscription_manager_available() {
+    step "Checking subscription-manager availability"
+
+    if ! command -v subscription-manager >/dev/null 2>&1; then
+        fail "Required command not found: subscription-manager"
+        warn "Install or repair subscription-manager before continuing Activity 2."
+        return 1
+    fi
+
+    pass "Required command found: subscription-manager"
+    return 0
+}
+
+run_subscription_manager_noninteractive() {
+    local output_file="$1"
+    shift
+
+    if [[ -z "$output_file" || "$#" -eq 0 ]]; then
+        die "Usage: run_subscription_manager_noninteractive <output_file> <subscription-manager arguments...>"
+    fi
+
+    : > "$output_file" || die "Could not write temporary output file: ${output_file}"
+
+    if [[ "${EUID}" -eq 0 ]]; then
+        subscription-manager "$@" >"$output_file" 2>&1
+        return $?
+    fi
+
+    if sudo -n true >/dev/null 2>&1; then
+        sudo -n subscription-manager "$@" >"$output_file" 2>&1
+        return $?
+    fi
+
+    {
+        echo "Non-interactive sudo authentication is not available."
+        echo "Skipping privileged subscription-manager check to avoid GUI authentication prompts."
+    } >"$output_file"
+
+    return 2
+}
+
+check_subscription_identity() {
+    local identity_output
+    local rc
+
+    step "Checking Red Hat subscription identity"
+
+    identity_output="$(mktemp)"
+    run_subscription_manager_noninteractive "$identity_output" identity
+    rc=$?
+
+    if [[ "$rc" -eq 0 ]]; then
+        pass "System has a Red Hat subscription identity."
+        rm -f "$identity_output"
+        return 0
+    fi
+
+    if [[ "$rc" -eq 2 ]]; then
+        warn "Subscription identity check skipped in non-root verification mode."
+        info "Reason: $(tr '\n' ' ' < "$identity_output")"
+        info "Run setup-control-node.sh --apply with sudo for privileged subscription checks."
+        rm -f "$identity_output"
+        return 0
+    fi
+
+    fail "System does not appear to have a Red Hat subscription identity."
+    warn "Register the system through redhat.rit.edu before continuing Activity 2."
+    info "$(tr '\n' ' ' < "$identity_output")"
+    rm -f "$identity_output"
+    return 1
+}
+
+check_subscription_status() {
+    local status_output
+    local rc
+
+    step "Checking Red Hat subscription/content access status"
+
+    status_output="$(mktemp)"
+    run_subscription_manager_noninteractive "$status_output" status
+    rc=$?
+
+    if [[ "$rc" -eq 0 ]]; then
+        pass "subscription-manager status completed successfully."
+        rm -f "$status_output"
+        return 0
+    fi
+
+    if grep -qi "Overall Status: Unknown" "$status_output"; then
+        warn "subscription-manager reported Overall Status: Unknown."
+        warn "This can be normal with Simple Content Access environments."
+        info "Continuing because repository access will be verified separately."
+        rm -f "$status_output"
+        return 0
+    fi
+
+    if grep -qi "Simple Content Access" "$status_output"; then
+        warn "subscription-manager returned non-zero, but Simple Content Access appears to be enabled."
+        info "Continuing because repository access will be verified separately."
+        rm -f "$status_output"
+        return 0
+    fi
+
+    if [[ "$rc" -eq 2 ]]; then
+        warn "Subscription status check skipped in non-root verification mode."
+        info "Reason: $(tr '\n' ' ' < "$status_output")"
+        info "Repository access will be verified with dnf repolist."
+        rm -f "$status_output"
+        return 0
+    fi
+
+    fail "subscription-manager status reported a problem."
+    info "$(tr '\n' ' ' < "$status_output")"
+    rm -f "$status_output"
+    return 1
+}
+
+
+# ==============================================================================
+# Repository Checks
+# ==============================================================================
+
+list_enabled_repos() {
+    step "Listing enabled repositories"
+
+    if ! command -v dnf >/dev/null 2>&1; then
+        fail "Required command not found: dnf"
+        return 1
+    fi
+
+    if dnf repolist --enabled; then
+        pass "Enabled repository list displayed successfully."
+        return 0
+    fi
+
+    fail "Could not list enabled repositories with dnf."
+    warn "Repository access may not be fully configured."
+    return 1
+}
+
+get_enabled_repos_output() {
+    if command -v dnf >/dev/null 2>&1; then
+        dnf repolist --enabled 2>/dev/null
+        return $?
+    fi
+
+    return 1
+}
+
+check_enabled_repo_keyword() {
+    local repo_keyword="$1"
+    local repos_output
+
+    if [[ -z "$repo_keyword" ]]; then
+        die "Usage: check_enabled_repo_keyword <repo_keyword>"
+    fi
+
+    step "Checking for enabled repository keyword: ${repo_keyword}"
+
+    repos_output="$(get_enabled_repos_output || true)"
+
+    if grep -qi "$repo_keyword" <<< "$repos_output"; then
+        pass "Repository keyword found in enabled repositories: ${repo_keyword}"
+        return 0
+    fi
+
+    fail "Repository keyword not found in enabled repositories: ${repo_keyword}"
+    warn "CodeReady Builder does not appear to be enabled."
+    warn "Enable Red Hat CodeReady Linux Builder for RHEL 8 x86_64 through redhat.rit.edu."
+    return 1
+}
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   echo "[FAIL] lib/redhat.sh is a shared library and should be sourced, not executed."
   echo "[INFO] Example: source lib/redhat.sh"
