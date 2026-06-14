@@ -6,85 +6,56 @@
 # Shared Red Hat Enterprise Linux helper functions for Lab 4 automation scripts.
 #
 # Purpose:
-#  - Check Red Hat release information
-#  - Check subscription-manager availability
-#  - Check Red Hat subscription identity and status safely
-#  - Check enabled repository information without triggering GUI authentication
-#  - Support Activity 2 control-node setup and verification workflows
+#  - Check Red Hat release information.
+#  - Check subscription-manager availability.
+#  - Check Red Hat subscription identity and status safely.
+#  - Check enabled repository information without triggering GUI authentication.
+#  - Support Activity 2 control-node setup and verification workflows.
 #
-# Design:
-#  - This file does not auto-run actions when sourced.
-#  - Functions are called by setup and verification scripts.
-#  - Output is handled through lib/common.sh.
-#  - Verification should remain non-root and should not trigger GUI auth prompts.
+# Important:
+#  - This library does not register systems.
+#  - This library does not enable repositories by itself.
+#  - setup-control-node.sh --apply is responsible for sudo-required setup work.
+#  - verify-control-node.sh should run as the normal student user.
 #
-# RICE Framework:
-#  - Reproducibility: Red Hat checks produce predictable PASS/WARN/FAIL output.
-#  - Idempotency: Checks do not change system state.
-#  - Composability: Setup and verify scripts can reuse shared helper functions.
-#  - Evolvability: Repository and subscription checks can be extended later.
+# RICE Notes:
+#  - Reproducibility: standardizes Red Hat subscription and repository checks.
+#  - Idempotency: checks current state without changing registration.
+#  - Composability: reusable by Activity 2 setup and verification scripts.
+#  - Evolvability: future Red Hat repository checks can be added here.
 #
-# Dependencies:
-#  - lib/common.sh must be sourced before this file is used.
-#
-# Author:
-#  - Jared Husson
-#
-# ==============================================================================
-# Version History
-# ==============================================================================
-#
-# Version: v2.0
-# Date: 2026-06-10
-#
-# Changes:
-#  - Added Red Hat release checks.
-#  - Added subscription-manager availability checks.
-#  - Added subscription identity and status checks.
-#  - Added enabled repository keyword checks.
-#
-# ------------------------------------------------------------------------------
-#
-# Version: v2.1
-# Date: 2026-06-12
-#
-# Changes:
-#  - Prevented non-root verification from triggering GUI authentication prompts.
-#  - Updated subscription identity and status checks to skip privileged
-#    subscription-manager actions when verify-control-node.sh runs as student.
-#  - Preserved privileged subscription-manager checks for root/setup workflows.
-#  - Updated enabled repository checks to use dnf repolist --enabled.
-#
-# Notes:
-#  - verify-control-node.sh should remain non-root.
-#  - setup-control-node.sh --apply is still responsible for sudo-required setup.
-#  - v2.2 remains reserved for idempotent evidence archiving.
+# Version History:
+#  - v2.0 - Initial Red Hat subscription helper library for Activity 2.
+#  - v2.1 - Added CodeReady Builder and deprecated Ansible Engine repo checks.
+#  - v2.2 - Treat RIT/Satellite Organization/Environment content access as valid
+#           even when subscription-manager reports Overall Status: Unknown.
+#  - v2.3 - Prevent non-root verification from triggering GUI authentication
+#           prompts by skipping privileged subscription-manager identity/status
+#           checks and using dnf repolist for enabled repository checks.
 #
 # ==============================================================================
 
 
 # ==============================================================================
-# Source Guard
+# Safety guard
 # ==============================================================================
 
-if [[ -n "${LAB4_REDHAT_SH_LOADED:-}" ]]; then
-    return 0
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    echo "[FAIL] lib/redhat.sh is a shared library and should be sourced, not executed."
+    echo "[INFO] Example: source lib/redhat.sh"
+    exit 1
 fi
 
-LAB4_REDHAT_SH_LOADED="true"
-LAB4_REDHAT_VERSION="v2.1"
-
 
 # ==============================================================================
-# Red Hat Release Checks
+# Red Hat release checks
 # ==============================================================================
 
-check_redhat_release() {
+check_rhel_release() {
     step "Checking Red Hat release information"
 
     if [[ ! -f /etc/redhat-release ]]; then
-        fail "Red Hat release file was not found."
-        warn "This host does not appear to be a Red Hat Enterprise Linux system."
+        fail "Red Hat release file not found."
         return 1
     fi
 
@@ -93,39 +64,47 @@ check_redhat_release() {
     return 0
 }
 
+check_redhat_release() {
+    check_rhel_release
+}
+
 check_redhat_release_info() {
-    check_redhat_release
+    check_rhel_release
 }
 
 
 # ==============================================================================
-# subscription-manager Checks
+# subscription-manager checks
 # ==============================================================================
 
-check_subscription_manager_available() {
+check_subscription_manager() {
     step "Checking subscription-manager availability"
 
-    if ! command -v subscription-manager >/dev/null 2>&1; then
-        fail "Required command not found: subscription-manager"
-        warn "Install or repair subscription-manager before continuing Activity 2."
-        return 1
+    if command -v subscription-manager >/dev/null 2>&1; then
+        pass "Required command found: subscription-manager"
+        return 0
     fi
 
-    pass "Required command found: subscription-manager"
-    return 0
+    fail "Required command not found: subscription-manager"
+    warn "Install or repair subscription-manager before continuing Activity 2."
+    return 1
+}
+
+check_subscription_manager_available() {
+    check_subscription_manager
 }
 
 check_subscription_manager_availability() {
-    check_subscription_manager_available
+    check_subscription_manager
 }
 
-check_subscription_identity() {
+check_rhel_subscription_identity() {
     step "Checking Red Hat subscription identity"
 
     if [[ "${EUID}" -ne 0 ]]; then
-        warn "Privileged subscription identity check skipped in non-root verification mode."
-        info "This avoids GUI authentication prompts during verify-control-node.sh."
-        info "Run setup-control-node.sh --apply with sudo for subscription registration checks."
+        warn "Privileged subscription identity check skipped during non-root verification."
+        info "This avoids GUI authentication prompts from subscription-manager."
+        info "Run setup-control-node.sh --apply with sudo for privileged subscription checks."
         return 0
     fi
 
@@ -139,37 +118,41 @@ check_subscription_identity() {
     return 1
 }
 
-check_subscription_status() {
+check_subscription_identity() {
+    check_rhel_subscription_identity
+}
+
+check_rhel_subscription_status() {
     local status_output
-    local rc
+    local status_rc
 
     step "Checking Red Hat subscription/content access status"
 
     if [[ "${EUID}" -ne 0 ]]; then
-        warn "Privileged subscription status check skipped in non-root verification mode."
-        info "This avoids GUI authentication prompts during verify-control-node.sh."
+        warn "Privileged subscription status check skipped during non-root verification."
+        info "This avoids GUI authentication prompts from subscription-manager."
         info "Repository access will be verified with dnf repolist."
         return 0
     fi
 
     status_output="$(subscription-manager status 2>&1)"
-    rc=$?
+    status_rc=$?
 
-    if [[ "$rc" -eq 0 ]]; then
+    if [[ "$status_rc" -eq 0 ]]; then
         pass "subscription-manager status completed successfully."
         return 0
     fi
 
     if grep -qi "Overall Status: Unknown" <<< "$status_output"; then
-        warn "subscription-manager reported Overall Status: Unknown."
-        warn "This can be normal with Simple Content Access environments."
-        info "Continuing because repository access will be verified separately."
+        warn "subscription-manager reports Overall Status: Unknown."
+        warn "This can be normal in RIT/Satellite Organization/Environment access."
+        info "Repository access will be verified separately."
         return 0
     fi
 
     if grep -qi "Simple Content Access" <<< "$status_output"; then
         warn "subscription-manager returned non-zero, but Simple Content Access appears to be enabled."
-        info "Continuing because repository access will be verified separately."
+        info "Repository access will be verified separately."
         return 0
     fi
 
@@ -178,9 +161,13 @@ check_subscription_status() {
     return 1
 }
 
+check_subscription_status() {
+    check_rhel_subscription_status
+}
+
 
 # ==============================================================================
-# Repository Checks
+# Repository checks
 # ==============================================================================
 
 list_enabled_repos() {
@@ -231,7 +218,31 @@ check_enabled_repo_keyword() {
     fi
 
     fail "Repository keyword not found in enabled repositories: ${repo_keyword}"
-    warn "CodeReady Builder does not appear to be enabled."
-    warn "Enable Red Hat CodeReady Linux Builder for RHEL 8 x86_64 through redhat.rit.edu."
     return 1
+}
+
+check_deprecated_repo_keyword_absent() {
+    local repo_keyword="$1"
+    local repos_output
+
+    if [[ -z "$repo_keyword" ]]; then
+        die "Usage: check_deprecated_repo_keyword_absent <repo_keyword>"
+    fi
+
+    step "Checking deprecated repository keyword is absent: ${repo_keyword}"
+
+    repos_output="$(get_enabled_repos_output || true)"
+
+    if grep -qi "$repo_keyword" <<< "$repos_output"; then
+        fail "Deprecated repository keyword found in enabled repositories: ${repo_keyword}"
+        warn "Disable deprecated Red Hat Ansible Engine repositories for Activity 2."
+        return 1
+    fi
+
+    pass "Deprecated repository keyword not found: ${repo_keyword}"
+    return 0
+}
+
+check_deprecated_repo_absent() {
+    check_deprecated_repo_keyword_absent "$@"
 }
