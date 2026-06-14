@@ -5,6 +5,12 @@
 #
 # Shared Red Hat Enterprise Linux helper functions for Lab 4 automation scripts.
 #
+# Activity:
+#  - NSSA320 Lab 4 Activity 2
+#
+# Version:
+#  - v2.1.1
+#
 # Purpose:
 #  - Check Red Hat release information.
 #  - Check subscription-manager availability.
@@ -24,14 +30,12 @@
 #  - Composability: reusable by Activity 2 setup and verification scripts.
 #  - Evolvability: future Red Hat repository checks can be added here.
 #
-# Version History:
-#  - v2.0 - Initial Red Hat subscription helper library for Activity 2.
-#  - v2.1 - Added CodeReady Builder and deprecated Ansible Engine repo checks.
-#  - v2.2 - Treat RIT/Satellite Organization/Environment content access as valid
-#           even when subscription-manager reports Overall Status: Unknown.
-#  - v2.3 - Prevent non-root verification from triggering GUI authentication
-#           prompts by skipping privileged subscription-manager identity/status
-#           checks and using dnf repolist for enabled repository checks.
+# Notes:
+#  - v2.1.1 corrects the Red Hat helper after the v2.1 update.
+#  - Non-root verification skips privileged subscription-manager identity/status
+#    checks to avoid GUI authentication prompts.
+#  - Repository checks use dnf repolist --enabled.
+#  - v2.2 remains reserved for idempotent evidence archiving.
 #
 # ==============================================================================
 
@@ -170,34 +174,29 @@ check_subscription_status() {
 # Repository checks
 # ==============================================================================
 
-list_enabled_repos() {
-    step "Listing enabled repositories"
-
-    if ! command -v dnf >/dev/null 2>&1; then
-        fail "Required command not found: dnf"
-        return 1
-    fi
-
-    if dnf repolist --enabled; then
-        pass "Enabled repository list displayed successfully."
-        return 0
-    fi
-
-    fail "Could not list enabled repositories with dnf."
-    warn "Repository access may not be fully configured."
-    return 1
-}
-
-show_enabled_repos() {
-    list_enabled_repos
-}
-
 get_enabled_repos_output() {
     if ! command -v dnf >/dev/null 2>&1; then
         return 1
     fi
 
     dnf repolist --enabled 2>/dev/null
+}
+
+list_enabled_repos() {
+    step "Listing enabled Red Hat repositories"
+
+    if get_enabled_repos_output; then
+        pass "Enabled repository list displayed successfully."
+        return 0
+    fi
+
+    fail "Could not list enabled repositories."
+    warn "Repository access may not be fully configured."
+    return 1
+}
+
+show_enabled_repos() {
+    list_enabled_repos
 }
 
 check_enabled_repo_keyword() {
@@ -212,7 +211,7 @@ check_enabled_repo_keyword() {
 
     repos_output="$(get_enabled_repos_output || true)"
 
-    if grep -qi "$repo_keyword" <<< "$repos_output"; then
+    if grep -qi -- "$repo_keyword" <<< "$repos_output"; then
         pass "Repository keyword found in enabled repositories: ${repo_keyword}"
         return 0
     fi
@@ -221,28 +220,56 @@ check_enabled_repo_keyword() {
     return 1
 }
 
-check_deprecated_repo_keyword_absent() {
-    local repo_keyword="$1"
-    local repos_output
+check_codeready_builder_enabled() {
+    local repo_keyword="${ACTIVITY2_REQUIRED_REPO_KEYWORD:-codeready-builder}"
 
-    if [[ -z "$repo_keyword" ]]; then
-        die "Usage: check_deprecated_repo_keyword_absent <repo_keyword>"
+    step "Checking CodeReady Builder repository"
+
+    if check_enabled_repo_keyword "$repo_keyword"; then
+        pass "CodeReady Builder appears to be enabled."
+        return 0
     fi
 
-    step "Checking deprecated repository keyword is absent: ${repo_keyword}"
+    warn "CodeReady Builder does not appear to be enabled."
+    warn "Enable Red Hat CodeReady Linux Builder for RHEL 8 x86_64 through redhat.rit.edu."
+    return 1
+}
+
+check_deprecated_ansible_engine_repo_not_enabled() {
+    local repo_keyword="${ACTIVITY2_DEPRECATED_REPO_KEYWORD:-ansible-2}"
+    local repos_output
+
+    step "Checking deprecated Ansible Engine repository is not enabled"
 
     repos_output="$(get_enabled_repos_output || true)"
 
-    if grep -qi "$repo_keyword" <<< "$repos_output"; then
-        fail "Deprecated repository keyword found in enabled repositories: ${repo_keyword}"
-        warn "Disable deprecated Red Hat Ansible Engine repositories for Activity 2."
+    if grep -qi -- "$repo_keyword" <<< "$repos_output"; then
+        fail "Deprecated Ansible Engine repository appears to be enabled: ${repo_keyword}"
+        warn "The lab says not to enable Red Hat Ansible Engine 2 for RHEL 8."
         return 1
     fi
 
-    pass "Deprecated repository keyword not found: ${repo_keyword}"
+    pass "Deprecated Ansible Engine repository keyword not found: ${repo_keyword}"
     return 0
 }
 
-check_deprecated_repo_absent() {
-    check_deprecated_repo_keyword_absent "$@"
+check_deprecated_ansible_engine_repo_disabled() {
+    check_deprecated_ansible_engine_repo_not_enabled
 }
+
+check_deprecated_ansible_engine_disabled() {
+    check_deprecated_ansible_engine_repo_not_enabled
+}
+
+check_deprecated_ansible_repo_not_enabled() {
+    check_deprecated_ansible_engine_repo_not_enabled
+}
+
+check_deprecated_repo_absent() {
+    check_deprecated_ansible_engine_repo_not_enabled
+}
+
+check_deprecated_repo_keyword_absent() {
+    check_deprecated_ansible_engine_repo_not_enabled
+}
+
