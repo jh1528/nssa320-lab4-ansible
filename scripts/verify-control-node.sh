@@ -1,380 +1,426 @@
 #!/usr/bin/env bash
+# ==============================================================================
+# verify-control-node.sh
+# ==============================================================================
 #
-# NSSA320 Lab 4 - Activity 2 Control Node Verification
-# File: scripts/verify-control-node.sh
+# Activity:
+#  - NSSA320 Lab 4 Activity 2
+#
+# Version:
+#  - v2.2
 #
 # Purpose:
-#   Verifies the RHEL 8 control node after Activity 2 setup and captures
-#   professor-facing Figure 2 evidence for Ansible installation.
+#  - Verify the RHEL 8 Ansible control node setup for Activity 2.
+#  - Confirm required Red Hat, repository, package, and command state.
+#  - Generate professor-facing Figure 2 evidence.
+#  - Archive previous Activity 2 evidence before generating new evidence.
 #
-# Scope:
-#   Activity 2 only.
-#   This script verifies the control node only.
-#
-# Safety:
-#   Read-only workflow.
-#   Does not install packages.
-#   Does not update packages.
-#   Does not register, unregister, refresh, or overwrite Red Hat licensing.
-#   Does not configure managed hosts, SSH keys, Ansible users, or sudoers files.
-#   Must not be run with sudo or as root.
+# Important:
+#  - Run this script as the normal student user.
+#  - Do NOT run this script with sudo.
+#  - setup-control-node.sh --apply performs sudo-required setup work.
+#  - This script verifies state and generates evidence only.
 #
 # RICE Notes:
-#   Reproducibility - runs the same verification sequence each time.
-#   Idempotency     - read-only validation with no system changes.
-#   Composability   - uses shared config and library functions.
-#   Evolvability    - screenshot tooling can be expanded without changing setup.
+#  - Reproducibility: verification commands are consistent across runs.
+#  - Idempotency: existing evidence is archived before new evidence is generated.
+#  - Composability: shared config and library helpers are sourced.
+#  - Evolvability: future evidence types can be added to the archive list.
 #
-# Version History:
-#   v2.0 - Initial Activity 2 verification and evidence workflow.
-#   v2.1 - Added automated Figure 2 screenshot capture with text evidence backup.
-#   v2.1.1 - Added graphical display preflight check for safer screenshot capture.
-#   v2.1.2 - Improved screenshot tool failure reporting and manual fallback guidance.
-#   v2.1.3 - Added root/sudo guard to protect user-owned evidence and GUI screenshots.
+# Version Notes:
+#  - v2.1.3 added root/sudo guard and evidence directory write checks.
+#  - v2.2 adds idempotent evidence archiving for text logs and screenshots.
+#
+# ==============================================================================
 
-set -euo pipefail
+
+# ==============================================================================
+# Strict mode
+# ==============================================================================
+
+set -u
+set -o pipefail
+
+
+# ==============================================================================
+# Root / sudo guard
+# ==============================================================================
+
+if [[ "${EUID}" -eq 0 ]]; then
+    echo "[FAIL] verify-control-node.sh must not be run as root or with sudo."
+    echo "[INFO] Run this script as the normal student user."
+    echo "[INFO] setup-control-node.sh --apply is the sudo-required setup workflow."
+    exit 1
+fi
+
+
+# ==============================================================================
+# Repository paths
+# ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-cd "$REPO_ROOT"
-
-# ---------------------------------------------------------------------------
-# Source shared configuration and libraries
-# ---------------------------------------------------------------------------
-
-source config/lab4.conf
-source config/activity2.conf
-source lib/common.sh
-source lib/redhat.sh
-source lib/packages.sh
-
-SCRIPT_NAME="$(basename "$0")"
-
-usage() {
-  cat <<EOF
-Usage:
-  $SCRIPT_NAME
-  $SCRIPT_NAME --help
-
-Description:
-  Runs read-only Activity 2 verification and captures Figure 2 screenshot
-  evidence for the Ansible control-node installation.
-
-Professor-facing Figure 2 command:
-  hostname; date; ansible --version
-
-Evidence outputs:
-  Text log:
-    ${ACTIVITY2_FIGURE2_OUTPUT}
-
-  Screenshot:
-    ${ACTIVITY2_FIGURE2_SCREENSHOT}
-
-Notes:
-  The screenshot is the primary professor-facing deliverable.
-  The text log is supporting evidence for troubleshooting and documentation.
-
-  Automatic screenshot capture requires a graphical desktop session.
-  If this script is run from a non-GUI terminal or a session that cannot access
-  the display server, it will still print the Figure 2 evidence block and save
-  the text log, but screenshot capture may need to be done manually.
-
-  Do not run this script with sudo.
-  Evidence files and screenshots should be created from the student user session.
-
-EOF
+cd "$REPO_ROOT" || {
+    echo "[FAIL] Could not change to repository root: ${REPO_ROOT}"
+    exit 1
 }
 
-refuse_root_execution() {
-  step "Checking verification execution user"
 
-  if [[ "$EUID" -eq 0 ]]; then
-    fail "Do not run this verification script with sudo or as root."
-    warn "This script creates user-owned evidence and may use GUI screenshot tools."
-    warn "Running it with sudo can create root-owned evidence files and break screenshot capture."
-    warn "Run instead:"
-    warn "  ./scripts/verify-control-node.sh"
-    return 1
-  fi
+# ==============================================================================
+# Source shared files
+# ==============================================================================
 
-  pass "Verification script is running as a non-root user."
+if [[ ! -f "lib/common.sh" ]]; then
+    echo "[FAIL] Missing required library: lib/common.sh"
+    exit 1
+fi
+
+source "lib/common.sh"
+
+if [[ -f "config/lab4.conf" ]]; then
+    source "config/lab4.conf"
+else
+    warn "Optional config not found: config/lab4.conf"
+fi
+
+if [[ ! -f "config/activity2.conf" ]]; then
+    die "Missing required config: config/activity2.conf"
+fi
+
+source "config/activity2.conf"
+
+if [[ ! -f "lib/redhat.sh" ]]; then
+    die "Missing required library: lib/redhat.sh"
+fi
+
+source "lib/redhat.sh"
+
+if [[ -f "lib/packages.sh" ]]; then
+    source "lib/packages.sh"
+else
+    warn "Optional library not found: lib/packages.sh"
+fi
+
+
+# ==============================================================================
+# Defaults from Activity 2 config
+# ==============================================================================
+
+ACTIVITY2_EVIDENCE_DIR="${ACTIVITY2_EVIDENCE_DIR:-evidence/activity2}"
+ACTIVITY2_ARCHIVE_DIR="${ACTIVITY2_ARCHIVE_DIR:-${ACTIVITY2_EVIDENCE_DIR}/archive}"
+
+ACTIVITY2_VERIFY_OUTPUT="${ACTIVITY2_VERIFY_OUTPUT:-${ACTIVITY2_EVIDENCE_DIR}/control-node-verification.txt}"
+ACTIVITY2_FIGURE2_OUTPUT="${ACTIVITY2_FIGURE2_OUTPUT:-${ACTIVITY2_EVIDENCE_DIR}/figure2-terminal-output.txt}"
+ACTIVITY2_FIGURE2_SCREENSHOT="${ACTIVITY2_FIGURE2_SCREENSHOT:-${ACTIVITY2_EVIDENCE_DIR}/figure2-ansible-install-verification.png}"
+
+ACTIVITY2_SCREENSHOT_DELAY_SECONDS="${ACTIVITY2_SCREENSHOT_DELAY_SECONDS:-5}"
+ACTIVITY2_REQUIRED_REPO_KEYWORD="${ACTIVITY2_REQUIRED_REPO_KEYWORD:-codeready-builder}"
+ACTIVITY2_DEPRECATED_REPO_KEYWORD="${ACTIVITY2_DEPRECATED_REPO_KEYWORD:-ansible-2}"
+
+FAILURES=0
+
+
+# ==============================================================================
+# Failure tracking
+# ==============================================================================
+
+record_failure() {
+    FAILURES="$((FAILURES + 1))"
 }
 
-print_figure2_block() {
-  clear || true
 
-  printf '\n'
-  printf '============================================================\n'
-  printf ' Figure 2 - Ansible Install Verification\n'
-  printf '============================================================\n'
-  printf '\n'
-  printf '$ hostname; date; ansible --version\n'
-  printf '\n'
+# ==============================================================================
+# Evidence helpers
+# ==============================================================================
 
-  hostname
-  date
-  ansible --version
+prepare_activity2_evidence_directories() {
+    step "Preparing Activity 2 evidence directories"
 
-  printf '\n'
-  printf '============================================================\n'
-  printf ' Screenshot requirement satisfied:\n'
-  printf '   hostname; date; ansible --version\n'
-  printf '============================================================\n'
-  printf '\n'
-}
+    mkdir -p "$ACTIVITY2_EVIDENCE_DIR" || die "Failed to create evidence directory: ${ACTIVITY2_EVIDENCE_DIR}"
+    mkdir -p "$ACTIVITY2_ARCHIVE_DIR" || die "Failed to create archive directory: ${ACTIVITY2_ARCHIVE_DIR}"
 
-graphical_display_available() {
-  if [[ -z "${DISPLAY:-}" ]]; then
-    warn "DISPLAY is not set. Graphical screenshot capture is unavailable."
-    return 1
-  fi
-
-  if [[ "$DISPLAY" =~ ^:([0-9]+) ]]; then
-    local display_number="${BASH_REMATCH[1]}"
-
-    if [[ ! -S "/tmp/.X11-unix/X${display_number}" ]]; then
-      warn "DISPLAY is set to ${DISPLAY}, but the X11 socket is not available."
-      return 1
+    if [[ ! -w "$ACTIVITY2_EVIDENCE_DIR" ]]; then
+        fail "Activity 2 evidence directory is not writable: ${ACTIVITY2_EVIDENCE_DIR}"
+        info "This can happen if verification was previously run with sudo."
+        info "Recovery command:"
+        info "  sudo chown -R student:student ${ACTIVITY2_EVIDENCE_DIR}"
+        die "Fix evidence directory ownership before continuing"
     fi
-  fi
 
-  if [[ "${XDG_SESSION_TYPE:-}" == "wayland" ]]; then
-    warn "Wayland session detected."
-    warn "Some X11 screenshot tools such as scrot/import may not work under Wayland."
-    warn "gnome-screenshot may still work if it can access the active user session."
-  fi
+    if [[ ! -w "$ACTIVITY2_ARCHIVE_DIR" ]]; then
+        fail "Activity 2 archive directory is not writable: ${ACTIVITY2_ARCHIVE_DIR}"
+        info "This can happen if verification was previously run with sudo."
+        info "Recovery command:"
+        info "  sudo chown -R student:student ${ACTIVITY2_EVIDENCE_DIR}"
+        die "Fix evidence archive ownership before continuing"
+    fi
 
-  pass "Graphical display appears available: ${DISPLAY}"
+    pass "Evidence directory ready: ${ACTIVITY2_EVIDENCE_DIR}"
+    pass "Archive directory ready: ${ACTIVITY2_ARCHIVE_DIR}"
 }
 
-report_screenshot_failure() {
-  local tool_name="$1"
-  local error_file="$2"
+archive_existing_evidence_file() {
+    local evidence_file="$1"
+    local archive_dir="$2"
+    local file_name
+    local file_stem
+    local file_extension
+    local timestamp
+    local archive_path
+    local counter
 
-  warn "${tool_name} failed to capture the screenshot."
+    if [[ -z "$evidence_file" || -z "$archive_dir" ]]; then
+        die "Usage: archive_existing_evidence_file <evidence_file> <archive_dir>"
+    fi
 
-  if [[ -s "$error_file" ]]; then
-    warn "Failure output from ${tool_name}:"
-    sed 's/^/[WARN]   /' "$error_file"
-  else
-    warn "No detailed error output was produced by ${tool_name}."
-  fi
+    if [[ ! -f "$evidence_file" ]]; then
+        info "No existing evidence file to archive: ${evidence_file}"
+        return 0
+    fi
+
+    file_name="$(basename "$evidence_file")"
+
+    if [[ "$file_name" == *.* ]]; then
+        file_stem="${file_name%.*}"
+        file_extension="${file_name##*.}"
+    else
+        file_stem="$file_name"
+        file_extension="evidence"
+    fi
+
+    timestamp="$(date +%Y%m%d-%H%M%S)"
+    archive_path="${archive_dir}/${file_stem}-${timestamp}.${file_extension}"
+    counter=1
+
+    while [[ -e "$archive_path" ]]; do
+        archive_path="${archive_dir}/${file_stem}-${timestamp}-${counter}.${file_extension}"
+        counter="$((counter + 1))"
+    done
+
+    info "Archiving existing evidence file: ${evidence_file}"
+    info "Archive destination: ${archive_path}"
+
+    mv "$evidence_file" "$archive_path" || die "Failed to archive evidence file: ${evidence_file}"
+
+    pass "Archived previous evidence: ${archive_path}"
 }
 
-capture_with_gnome_screenshot() {
-  local error_file
-  error_file="$(mktemp)"
+archive_activity2_evidence() {
+    step "Archiving existing Activity 2 evidence"
 
-  info "Screenshot tool found: gnome-screenshot"
-  info "Screenshot will be captured in ${ACTIVITY2_SCREENSHOT_DELAY_SECONDS} seconds."
-  info "Keep the Figure 2 terminal block visible."
+    archive_existing_evidence_file "$ACTIVITY2_VERIFY_OUTPUT" "$ACTIVITY2_ARCHIVE_DIR"
+    archive_existing_evidence_file "$ACTIVITY2_FIGURE2_OUTPUT" "$ACTIVITY2_ARCHIVE_DIR"
+    archive_existing_evidence_file "$ACTIVITY2_FIGURE2_SCREENSHOT" "$ACTIVITY2_ARCHIVE_DIR"
 
-  sleep "$ACTIVITY2_SCREENSHOT_DELAY_SECONDS"
+    pass "Activity 2 evidence archive check complete"
+}
 
-  if gnome-screenshot -f "$ACTIVITY2_FIGURE2_SCREENSHOT" >"$error_file" 2>&1; then
+
+# ==============================================================================
+# Verification helpers
+# ==============================================================================
+
+verify_required_commands() {
+    local command_name
+
+    step "Checking Activity 2 required commands"
+
+    for command_name in "${ACTIVITY2_REQUIRED_COMMANDS[@]}"; do
+        if command -v "$command_name" >/dev/null 2>&1; then
+            pass "Required command found: ${command_name}"
+        else
+            fail "Required command not found: ${command_name}"
+            record_failure
+        fi
+    done
+}
+
+verify_required_packages() {
+    local package_name
+
+    step "Checking Activity 2 required packages"
+
+    for package_name in "${ACTIVITY2_REQUIRED_PACKAGES[@]}"; do
+        if rpm -q "$package_name" >/dev/null 2>&1; then
+            pass "Required package installed: ${package_name}"
+        else
+            fail "Required package not installed: ${package_name}"
+            record_failure
+        fi
+    done
+}
+
+verify_redhat_state() {
+    step "Running Red Hat and repository checks"
+
+    check_rhel_release || record_failure
+    check_subscription_manager || record_failure
+    check_subscription_identity || record_failure
+    check_subscription_status || record_failure
+    check_codeready_builder_enabled || record_failure
+    check_deprecated_ansible_engine_repo_not_enabled || record_failure
+}
+
+capture_figure2_text_evidence() {
+    step "Capturing Figure 2 terminal text evidence"
+
+    {
+        echo "Figure 2 - Ansible Install Verification"
+        echo "Activity: ${ACTIVITY2_NAME:-Setting Up the Ansible Control Node}"
+        echo "Version: ${ACTIVITY2_VERSION:-v2.2}"
+        echo
+        echo "Command: hostname"
+        hostname
+        echo
+        echo "Command: date"
+        date
+        echo
+        echo "Command: ansible --version"
+        ansible --version
+    } | tee "$ACTIVITY2_FIGURE2_OUTPUT"
+
+    if [[ -s "$ACTIVITY2_FIGURE2_OUTPUT" ]]; then
+        pass "Figure 2 text evidence written: ${ACTIVITY2_FIGURE2_OUTPUT}"
+    else
+        fail "Figure 2 text evidence was not created correctly"
+        record_failure
+    fi
+}
+
+check_graphical_environment() {
+    step "Checking graphical screenshot environment"
+
+    if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+        warn "No DISPLAY or WAYLAND_DISPLAY detected."
+        warn "Automated screenshot capture may not work in this session."
+        return 1
+    fi
+
+    info "DISPLAY=${DISPLAY:-not-set}"
+    info "WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-not-set}"
+    info "XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-not-set}"
+
+    if [[ "${XDG_SESSION_TYPE:-}" == "wayland" ]]; then
+        warn "Wayland session detected. Some screenshot tools may behave differently."
+    fi
+
+    pass "Graphical session variables detected"
+    return 0
+}
+
+capture_figure2_screenshot() {
+    local screenshot_tool_used=""
+
+    step "Capturing Figure 2 screenshot"
+
+    if ! check_graphical_environment; then
+        warn "Skipping automated screenshot because graphical environment was not detected."
+        warn "Manual fallback: capture Figure 2 screenshot yourself and save it as:"
+        warn "  ${ACTIVITY2_FIGURE2_SCREENSHOT}"
+        return 0
+    fi
+
+    info "Screenshot will be captured after ${ACTIVITY2_SCREENSHOT_DELAY_SECONDS} seconds."
+    info "Make sure the terminal shows hostname, date, and ansible --version output."
+    sleep "$ACTIVITY2_SCREENSHOT_DELAY_SECONDS"
+
+    if command -v gnome-screenshot >/dev/null 2>&1; then
+        if gnome-screenshot -f "$ACTIVITY2_FIGURE2_SCREENSHOT" >/dev/null 2>&1; then
+            screenshot_tool_used="gnome-screenshot"
+        else
+            warn "gnome-screenshot failed to save screenshot."
+        fi
+    fi
+
+    if [[ -z "$screenshot_tool_used" ]] && command -v scrot >/dev/null 2>&1; then
+        if scrot "$ACTIVITY2_FIGURE2_SCREENSHOT" >/dev/null 2>&1; then
+            screenshot_tool_used="scrot"
+        else
+            warn "scrot failed to save screenshot."
+        fi
+    fi
+
+    if [[ -z "$screenshot_tool_used" ]] && command -v import >/dev/null 2>&1; then
+        if import -window root "$ACTIVITY2_FIGURE2_SCREENSHOT" >/dev/null 2>&1; then
+            screenshot_tool_used="import"
+        else
+            warn "ImageMagick import failed to save screenshot."
+        fi
+    fi
+
+    if [[ -n "$screenshot_tool_used" && -f "$ACTIVITY2_FIGURE2_SCREENSHOT" ]]; then
+        pass "Figure 2 screenshot captured with ${screenshot_tool_used}: ${ACTIVITY2_FIGURE2_SCREENSHOT}"
+        return 0
+    fi
+
+    warn "Automated screenshot capture did not complete."
+    warn "Manual fallback: save the screenshot as:"
+    warn "  ${ACTIVITY2_FIGURE2_SCREENSHOT}"
+    return 0
+}
+
+show_activity2_evidence_locations() {
+    step "Activity 2 evidence locations"
+
+    info "Verification log: ${ACTIVITY2_VERIFY_OUTPUT}"
+    info "Figure 2 text output: ${ACTIVITY2_FIGURE2_OUTPUT}"
+    info "Figure 2 screenshot: ${ACTIVITY2_FIGURE2_SCREENSHOT}"
+    info "Archive directory: ${ACTIVITY2_ARCHIVE_DIR}"
+
+    if [[ -f "$ACTIVITY2_VERIFY_OUTPUT" ]]; then
+        pass "Verification log exists"
+    else
+        warn "Verification log does not exist yet"
+    fi
+
+    if [[ -f "$ACTIVITY2_FIGURE2_OUTPUT" ]]; then
+        pass "Figure 2 text output exists"
+    else
+        warn "Figure 2 text output does not exist yet"
+    fi
+
     if [[ -f "$ACTIVITY2_FIGURE2_SCREENSHOT" ]]; then
-      rm -f "$error_file"
-      pass "Screenshot saved to: ${ACTIVITY2_FIGURE2_SCREENSHOT}"
-      return 0
+        pass "Figure 2 screenshot exists"
+    else
+        warn "Figure 2 screenshot does not exist yet"
     fi
-  fi
-
-  report_screenshot_failure "gnome-screenshot" "$error_file"
-  rm -f "$error_file"
-  return 1
 }
 
-capture_with_scrot() {
-  local error_file
-  error_file="$(mktemp)"
 
-  info "Screenshot tool found: scrot"
-  info "Screenshot will be captured in ${ACTIVITY2_SCREENSHOT_DELAY_SECONDS} seconds."
-  info "Keep the Figure 2 terminal block visible."
-
-  sleep "$ACTIVITY2_SCREENSHOT_DELAY_SECONDS"
-
-  if scrot "$ACTIVITY2_FIGURE2_SCREENSHOT" >"$error_file" 2>&1; then
-    if [[ -f "$ACTIVITY2_FIGURE2_SCREENSHOT" ]]; then
-      rm -f "$error_file"
-      pass "Screenshot saved to: ${ACTIVITY2_FIGURE2_SCREENSHOT}"
-      return 0
-    fi
-  fi
-
-  report_screenshot_failure "scrot" "$error_file"
-  rm -f "$error_file"
-  return 1
-}
-
-capture_with_import() {
-  local error_file
-  error_file="$(mktemp)"
-
-  info "Screenshot tool found: import"
-  info "Screenshot will be captured in ${ACTIVITY2_SCREENSHOT_DELAY_SECONDS} seconds."
-  info "Click the terminal window when the cursor changes."
-
-  sleep "$ACTIVITY2_SCREENSHOT_DELAY_SECONDS"
-
-  if import "$ACTIVITY2_FIGURE2_SCREENSHOT" >"$error_file" 2>&1; then
-    if [[ -f "$ACTIVITY2_FIGURE2_SCREENSHOT" ]]; then
-      rm -f "$error_file"
-      pass "Screenshot saved to: ${ACTIVITY2_FIGURE2_SCREENSHOT}"
-      return 0
-    fi
-  fi
-
-  report_screenshot_failure "import" "$error_file"
-  rm -f "$error_file"
-  return 1
-}
-
-capture_screenshot_with_available_tool() {
-  step "Capturing Figure 2 screenshot"
-
-  mkdir -p "$ACTIVITY2_EVIDENCE_DIR"
-
-  if [[ ! -w "$ACTIVITY2_EVIDENCE_DIR" ]]; then
-    fail "Evidence directory is not writable by the current user: ${ACTIVITY2_EVIDENCE_DIR}"
-    warn "This usually happens if the verification script was previously run with sudo."
-    warn "Fix ownership, then rerun as student:"
-    warn "  sudo chown -R student:student ${ACTIVITY2_EVIDENCE_DIR}"
-    warn "  ./scripts/verify-control-node.sh"
-    return 1
-  fi
-
-  if ! graphical_display_available; then
-    warn "Automatic screenshot capture requires a graphical desktop session."
-    warn "Manual fallback: screenshot the Figure 2 terminal block above."
-    return 1
-  fi
-
-  if command -v gnome-screenshot >/dev/null 2>&1; then
-    if capture_with_gnome_screenshot; then
-      return 0
-    fi
-  else
-    warn "Screenshot tool not found: gnome-screenshot"
-  fi
-
-  if command -v scrot >/dev/null 2>&1; then
-    if capture_with_scrot; then
-      return 0
-    fi
-  else
-    warn "Screenshot tool not found: scrot"
-  fi
-
-  if command -v import >/dev/null 2>&1; then
-    if capture_with_import; then
-      return 0
-    fi
-  else
-    warn "Screenshot tool not found: import"
-  fi
-
-  warn "No supported screenshot tool successfully captured Figure 2."
-  warn "Manual fallback: screenshot the Figure 2 terminal block above."
-  warn "Your terminal output is still valid for manual screenshot capture."
-  return 1
-}
-
-write_text_evidence() {
-  step "Writing supporting text evidence"
-
-  mkdir -p "$ACTIVITY2_EVIDENCE_DIR"
-
-  if [[ ! -w "$ACTIVITY2_EVIDENCE_DIR" ]]; then
-    fail "Evidence directory is not writable by the current user: ${ACTIVITY2_EVIDENCE_DIR}"
-    warn "This usually happens if the verification script was previously run with sudo."
-    warn "Fix ownership, then rerun as student:"
-    warn "  sudo chown -R student:student ${ACTIVITY2_EVIDENCE_DIR}"
-    warn "  ./scripts/verify-control-node.sh"
-    return 1
-  fi
-
-  {
-    printf 'Figure 2 - Ansible Install Verification\n'
-    printf 'Generated by: %s\n' "$SCRIPT_NAME"
-    printf 'Activity: %s\n' "${ACTIVITY2_NAME}"
-    printf 'Activity version: %s\n' "${ACTIVITY2_VERSION}"
-    printf '\n'
-    printf '$ hostname; date; ansible --version\n'
-    hostname
-    date
-    ansible --version
-    printf '\n'
-    printf 'Supporting checks:\n'
-    python3 --version
-    rpm -q epel-release
-    rpm -q ansible
-  } > "$ACTIVITY2_FIGURE2_OUTPUT"
-
-  pass "Text evidence saved to: ${ACTIVITY2_FIGURE2_OUTPUT}"
-}
-
-run_preflight_checks() {
-  step "Running Activity 2 verification preflight checks"
-
-  check_rhel_release
-  check_subscription_manager_available
-  check_subscription_identity
-  check_subscription_status
-  check_codeready_builder_enabled
-  check_deprecated_ansible_repo_not_enabled
-
-  step "Checking installed Activity 2 packages"
-
-  check_package_installed epel-release
-  check_package_installed ansible
-
-  step "Checking required commands"
-
-  check_command_available hostname
-  check_command_available date
-  check_command_available ansible
-  check_command_available python3
-}
-
-run_verification() {
-  refuse_root_execution
-
-  run_preflight_checks
-
-  write_text_evidence
-
-  step "Displaying professor-facing Figure 2 evidence"
-  info "The next screen is designed for screenshot capture."
-  info "Required visible command: hostname; date; ansible --version"
-  info "Screenshot title: Figure 2 – Ansible Install Verification"
-  sleep 2
-
-  print_figure2_block
-
-  capture_screenshot_with_available_tool || true
-
-  printf '\n'
-  pass "Activity 2 Figure 2 verification workflow complete."
-  info "Screenshot path: ${ACTIVITY2_FIGURE2_SCREENSHOT}"
-  info "Text evidence path: ${ACTIVITY2_FIGURE2_OUTPUT}"
-}
+# ==============================================================================
+# Main
+# ==============================================================================
 
 main() {
-  case "${1:-}" in
-    -h|--help)
-      usage
-      ;;
-    "")
-      run_verification
-      ;;
-    *)
-      fail "Unknown argument: $1"
-      usage
-      exit 2
-      ;;
-  esac
+    prepare_activity2_evidence_directories
+    archive_activity2_evidence
+
+    exec > >(tee "$ACTIVITY2_VERIFY_OUTPUT") 2>&1
+
+    step "Starting Activity 2 control node verification"
+    info "Activity: ${ACTIVITY2_NAME:-Setting Up the Ansible Control Node}"
+    info "Version: ${ACTIVITY2_VERSION:-v2.2}"
+    info "User: $(id -un)"
+    info "Repository root: ${REPO_ROOT}"
+
+    verify_redhat_state
+    verify_required_commands
+    verify_required_packages
+    capture_figure2_text_evidence
+    capture_figure2_screenshot
+    show_activity2_evidence_locations
+
+    if [[ "$FAILURES" -gt 0 ]]; then
+        fail "Activity 2 verification completed with ${FAILURES} issue(s)."
+        return 1
+    fi
+
+    pass "Activity 2 verification completed successfully."
+    return 0
 }
 
 main "$@"
+
+
+chmod +x scripts/verify-control-node.sh
