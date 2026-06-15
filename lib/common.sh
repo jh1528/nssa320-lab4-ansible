@@ -3,7 +3,7 @@
 # common.sh
 # ==============================================================================
 #
-# Shared output and safety helpers...
+# Shared output and safety helpers.
 #
 # Author:
 #  - Jared Husson
@@ -11,6 +11,12 @@
 # ==============================================================================
 # Version History
 # ==============================================================================
+#
+# Version: 1.3
+# Date: 2026-06-14
+#
+# Changes:
+#  - Added require_not_root for workflows that must run as the normal student user.
 #
 # Version: 1.2
 # Date: 2026-06-09
@@ -26,7 +32,8 @@
 #  - Kept color-coded PASS/WARN/FAIL/INFO/STEP output for readable validation.
 #
 # Notes:
-#  - Version 1.2 is the baseline reusable common helper library for Activity 1.
+#  - Version 1.3 is the shared reusable common helper library baseline for
+#    Activity 3 workflows.
 #  - Future scripts should source this file instead of redefining output helpers.
 #
 # ==============================================================================
@@ -120,6 +127,14 @@ require_root() {
     fi
 
     pass "Root privileges confirmed."
+}
+
+require_not_root() {
+    if [[ "${EUID}" -eq 0 ]]; then
+        die "This script must be run as the normal student user, not with sudo."
+    fi
+
+    pass "Normal user execution confirmed."
 }
 
 require_command() {
