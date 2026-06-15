@@ -3,7 +3,7 @@
 # ssh.sh
 # ==============================================================================
 #
-# Shared SSH service helpers for Lab 4 Activity 1.
+# Shared SSH helpers for Lab 4.
 #
 # Purpose:
 #  - Detect the Linux distribution family
@@ -12,18 +12,21 @@
 #  - Enable and start the SSH service
 #  - Validate SSH service status
 #  - Show Activity 1 evidence commands for Ubuntu SSH verification
+#  - Support Activity 3 SSH access checks and SSH key deployment
 #
 # Design:
 #  - This file does not auto-run actions when sourced.
-#  - Functions are called by scripts such as bootstrap-node.sh and health-check.sh.
+#  - Functions are called by scripts such as bootstrap-node.sh,
+#    health-check.sh, setup-managed-hosts.sh, and verify-managed-hosts.sh.
 #  - Output is handled through lib/common.sh.
-#  - SSH service configuration is kept separate from SSH key automation.
+#  - SSH service configuration is kept separate from Ansible user creation.
+#  - Activity 3 helpers do not configure sudoers or passwordless sudo.
 #
 # RICE Framework:
-#  - Reproducibility: SSH readiness is checked the same way on every node.
-#  - Idempotency: Re-running enable/start commands is safe.
-#  - Composability: Bootstrap and health scripts can reuse SSH functions.
-#  - Evolvability: SSH key and Ansible user logic can be added later in Activity 3.
+#  - Reproducibility: SSH readiness and access checks are performed consistently.
+#  - Idempotency: Re-running enable/start commands and key checks is safe.
+#  - Composability: Bootstrap, health, setup, and verification scripts can reuse SSH functions.
+#  - Evolvability: Activity 4 privilege escalation can be added separately later.
 #
 # Dependencies:
 #  - lib/common.sh must be sourced before this file is used.
@@ -34,6 +37,16 @@
 # ==============================================================================
 # Version History
 # ==============================================================================
+#
+# Version: 1.1
+# Date: 2026-06-14
+#
+# Changes:
+#  - Added Activity 3 SSH access helper functions.
+#  - Added local SSH key existence/generation helper.
+#  - Added ssh-copy-id helper for managed hosts.
+#  - Added BatchMode-based key authentication verification helper.
+#  - Confirmed this file does not configure Activity 4 passwordless sudo.
 #
 # Version: 1.0
 # Date: 2026-06-09
@@ -46,7 +59,7 @@
 #  - Added Ubuntu Activity 1 evidence display helper.
 #
 # Notes:
-#  - This is the first Activity 1 version of the Lab 4 SSH management library.
+#  - Version 1.1 extends SSH support for Activity 3 managed-host access.
 #
 # ==============================================================================
 
@@ -229,4 +242,127 @@ show_ubuntu_ssh_evidence() {
     systemctl status ssh --no-pager
     date
     hostname
+}
+
+
+# ==============================================================================
+# Activity 3 SSH Access Helpers
+# ==============================================================================
+
+activity3_verify_basic_ssh_access() {
+    local remote_user="$1"
+    shift
+
+    local host
+
+    if [[ -z "$remote_user" || "$#" -eq 0 ]]; then
+        die "Usage: activity3_verify_basic_ssh_access <remote_user> <host> [host...]"
+    fi
+
+    step "Verifying basic SSH access"
+
+    info "Remote user: ${remote_user}"
+    info "This check allows first-time host key prompts and password prompts."
+
+    for host in "$@"; do
+        info "Testing SSH access to ${remote_user}@${host}"
+
+        ssh \
+            -o ConnectTimeout=10 \
+            "${remote_user}@${host}" \
+            'echo "remote hostname: $(hostname)"; echo "remote user: $(whoami)"; echo "remote date: $(date)"' \
+            || die "Basic SSH access failed for ${remote_user}@${host}"
+
+        pass "Basic SSH access succeeded: ${remote_user}@${host}"
+    done
+}
+
+activity3_ensure_local_ssh_key() {
+    local private_key_path="$1"
+    local public_key_path="$2"
+
+    if [[ -z "$private_key_path" || -z "$public_key_path" ]]; then
+        die "Usage: activity3_ensure_local_ssh_key <private_key_path> <public_key_path>"
+    fi
+
+    step "Checking local SSH key"
+
+    if [[ -f "$private_key_path" && -f "$public_key_path" ]]; then
+        pass "Existing SSH key pair found: ${private_key_path}"
+        info "Reusing existing SSH key pair."
+        return 0
+    fi
+
+    if [[ -f "$private_key_path" && ! -f "$public_key_path" ]]; then
+        die "Private key exists but public key is missing: ${public_key_path}"
+    fi
+
+    if [[ ! -f "$private_key_path" && -f "$public_key_path" ]]; then
+        die "Public key exists but private key is missing: ${private_key_path}"
+    fi
+
+    info "No SSH key pair found at: ${private_key_path}"
+    info "Generating a new SSH key pair with an empty passphrase for lab automation."
+
+    mkdir -p "$(dirname "$private_key_path")" || die "Failed to create SSH directory"
+    chmod 700 "$(dirname "$private_key_path")" || die "Failed to set SSH directory permissions"
+
+    ssh-keygen -t rsa -b 4096 -f "$private_key_path" -N "" \
+        || die "Failed to generate SSH key pair"
+
+    pass "SSH key pair generated: ${private_key_path}"
+}
+
+activity3_copy_ssh_key_to_managed_hosts() {
+    local remote_user="$1"
+    shift
+
+    local host
+
+    if [[ -z "$remote_user" || "$#" -eq 0 ]]; then
+        die "Usage: activity3_copy_ssh_key_to_managed_hosts <remote_user> <host> [host...]"
+    fi
+
+    step "Copying SSH public key to managed hosts"
+
+    info "Remote user: ${remote_user}"
+    info "You may be prompted for the ${remote_user} password on each host."
+
+    for host in "$@"; do
+        info "Copying SSH key to ${remote_user}@${host}"
+
+        ssh-copy-id "${remote_user}@${host}" \
+            || die "Failed to copy SSH key to ${remote_user}@${host}"
+
+        pass "SSH key copied or already present: ${remote_user}@${host}"
+    done
+}
+
+activity3_verify_key_based_ssh_access() {
+    local remote_user="$1"
+    shift
+
+    local host
+
+    if [[ -z "$remote_user" || "$#" -eq 0 ]]; then
+        die "Usage: activity3_verify_key_based_ssh_access <remote_user> <host> [host...]"
+    fi
+
+    step "Verifying key-based SSH access"
+
+    info "Remote user: ${remote_user}"
+    info "BatchMode=yes prevents password prompts. Failure means key-based SSH is not ready."
+
+    for host in "$@"; do
+        info "Testing key-based SSH access to ${remote_user}@${host}"
+
+        ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            "${remote_user}@${host}" \
+            'echo "remote hostname: $(hostname)"; echo "remote user: $(whoami)"; echo "remote date: $(date)"' \
+            || die "Key-based SSH access failed for ${remote_user}@${host}"
+
+        pass "Key-based SSH access succeeded: ${remote_user}@${host}"
+    done
 }

@@ -8,9 +8,16 @@ evidence/archive/*.log
 # Activity 2 generated evidence
 evidence/activity2/*.txt
 evidence/activity2/*.png
-evidence/activity2/archieve/*.txt
-evidence/activity2/archieve/*.png
+evidence/activity2/archive/*.txt
+evidence/activity2/archive/*.png
+evidence/activity3/*.txt
+evidence/activity3/*.png
+evidence/activity3/archive/*.txt
+evidence/activity3/archive/*.png
+evidence/activity3/archive/*
 
 # Keep evidence directory structure
 !evidence/activity2/.gitkeep
 !evidence/activity2/archive/.gitkeep
+!evidence/activity3/.gitkeep
+!evidence/activity3/archive/.gitkeep
