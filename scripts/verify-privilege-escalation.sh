@@ -6,7 +6,7 @@
 # Purpose:
 # Verifies Activity 4 privileged escalation by checking control-node sudo,
 # Activity 3 inventory reuse, managed-host sudoers validation, ansible.cfg,
-# and privileged Ansible execution without repeated interactive flags.
+# privileged Ansible execution, and idempotent Ansible behavior.
 #
 # Scope:
 # Activity 4 only.
@@ -27,6 +27,7 @@
 # Evolvability - keeps screenshot capture isolated in the verification workflow.
 #
 # Version History:
+# v4.1 - Updated Figure 4 evidence output for clear privilege and idempotency tests.
 # v4.0 - Initial Activity 4 privilege escalation verification workflow.
 
 set -euo pipefail
@@ -119,29 +120,62 @@ archive_activity4_evidence() {
 }
 
 capture_figure4_text_evidence() {
-    step "Capturing Figure 4 privilege escalation text evidence"
+    step "Capturing Figure 4 privilege escalation and idempotency evidence"
 
     {
+        echo "======================================================================"
         echo "NSSA320 Lab 4 - Activity 4 Figure 4 Evidence"
+        echo "Password-less Sudo Verification and Idempotency Demonstration"
+        echo "======================================================================"
         echo "Generated: $(date)"
         echo "Control node: $(hostname)"
         echo
-        echo "Working directory:"
+
+        echo "----------------------------------------------------------------------"
+        echo "Working Directory"
+        echo "----------------------------------------------------------------------"
         echo "$ACTIVITY4_LAB_DIR"
         echo
-        echo "Ansible configuration:"
+
+        echo "----------------------------------------------------------------------"
+        echo "Ansible Configuration"
+        echo "----------------------------------------------------------------------"
         cat "$ACTIVITY4_ANSIBLE_CFG"
         echo
-        echo "Inventory:"
+
+        echo "----------------------------------------------------------------------"
+        echo "Inventory"
+        echo "----------------------------------------------------------------------"
         cat "$ACTIVITY4_INVENTORY_FILE"
         echo
-        echo "Privileged Ansible command without -b, -k, or -K:"
+
+        echo "----------------------------------------------------------------------"
+        echo "Test 1: Privileged ad-hoc command without -b, -k, or -K"
+        echo "----------------------------------------------------------------------"
         echo "Command: ansible all -m command -a \"ls -ld /root\""
         echo
         (
             cd "$ACTIVITY4_LAB_DIR"
             ansible all -m command -a "ls -ld /root"
         )
+        echo
+
+        echo "----------------------------------------------------------------------"
+        echo "Test 2: Idempotent user module re-run"
+        echo "----------------------------------------------------------------------"
+        echo "Command: ansible all -m user -a \"name=${ACTIVITY4_SERVICE_USER} create_home=yes\""
+        echo
+        (
+            cd "$ACTIVITY4_LAB_DIR"
+            ansible all -m user -a "name=${ACTIVITY4_SERVICE_USER} create_home=yes"
+        )
+        echo
+
+        echo "----------------------------------------------------------------------"
+        echo "Figure 4 Result"
+        echo "----------------------------------------------------------------------"
+        echo "Privilege escalation succeeded without -b, -k, or -K."
+        echo "The idempotent user task completed as a re-run against the existing ${ACTIVITY4_SERVICE_USER} account."
     } | tee "$ACTIVITY4_FIGURE4_OUTPUT"
 
     pass "Figure 4 text evidence saved to: ${ACTIVITY4_FIGURE4_OUTPUT}"
@@ -154,6 +188,7 @@ capture_figure4_screenshot() {
     local screenshot_tool_used=""
 
     info "Screenshot target: ${screenshot_file}"
+    info "The Figure 4 evidence output should now be visible in the terminal."
     info "Waiting ${ACTIVITY4_SCREENSHOT_DELAY_SECONDS} seconds before screenshot capture."
     sleep "$ACTIVITY4_SCREENSHOT_DELAY_SECONDS"
 
@@ -201,7 +236,9 @@ verify_activity4() {
     activity4_verify_ansible_cfg
     activity4_validate_managed_sudoers
     activity4_verify_privileged_ansible_command
+    activity4_verify_idempotent_user_task
 
+    clear
     capture_figure4_text_evidence
     capture_figure4_screenshot
 
