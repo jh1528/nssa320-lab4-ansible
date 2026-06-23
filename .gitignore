@@ -1,6 +1,10 @@
 # Activity evidence archive attempts
 evidence/archive/*.log
 
+# Temporary runtime output
+*.tmp
+*.out
+
 # Activity 2 generated evidence
 evidence/activity2/*.txt
 evidence/activity2/*.png
