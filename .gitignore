@@ -10,14 +10,25 @@ evidence/activity2/*.txt
 evidence/activity2/*.png
 evidence/activity2/archive/*.txt
 evidence/activity2/archive/*.png
+
+# Activity 3 generated evidence
 evidence/activity3/*.txt
 evidence/activity3/*.png
 evidence/activity3/archive/*.txt
 evidence/activity3/archive/*.png
 evidence/activity3/archive/*
 
+# Activity 4 generated evidence
+evidence/activity4/*.txt
+evidence/activity4/*.png
+evidence/activity4/archive/*.txt
+evidence/activity4/archive/*.png
+evidence/activity4/archive/*
+
 # Keep evidence directory structure
 !evidence/activity2/.gitkeep
 !evidence/activity2/archive/.gitkeep
 !evidence/activity3/.gitkeep
 !evidence/activity3/archive/.gitkeep
+!evidence/activity4/.gitkeep
+!evidence/activity4/archive/.gitkeep
